@@ -416,7 +416,6 @@ namespace eka2l1::sdl {
 
     void on_key_press(void *userdata, std::uint32_t key) {
         auto *emu = reinterpret_cast<emulator_state *>(userdata);
-        LOG_INFO(FRONTEND_CMDLINE, "Key pressed: SDL keycode=0x{:X} ({})", key, key);
         auto evt = make_key_event_driver(static_cast<int>(key), drivers::key_state::pressed);
 
         const std::lock_guard<std::mutex> guard(emu->lockdown);
@@ -1336,6 +1335,27 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Create the emulator window and graphics driver once; they persist across app launches
+    // so that GPU resources (textures, bitmaps) remain valid.
+    state.window = std::make_unique<eka2l1::sdl::emu_window_sdl2>();
+
+    state.window->raw_mouse_event = eka2l1::sdl::on_mouse_evt;
+    state.window->button_pressed = eka2l1::sdl::on_key_press;
+    state.window->button_released = eka2l1::sdl::on_key_release;
+
+    state.window->init("EKA2L1", eka2l1::vec2(800, 600), eka2l1::drivers::emu_window_flag_maximum_size);
+    state.window->set_userdata(&state);
+    state.window->close_hook = [](void *userdata) {
+        auto *s = reinterpret_cast<eka2l1::sdl::emulator_state *>(userdata);
+        s->should_emu_quit.store(true);
+    };
+
+    state.graphics_event.reset();
+    std::thread graphics_thread_obj(eka2l1::sdl::graphics_driver_thread, std::ref(state));
+
+    // Hide the emulator window until an app is actually running
+    SDL_HideWindow(state.window->get_sdl_window());
+
     bool first_launch = true;
 
     while (true) {
@@ -1346,21 +1366,11 @@ int main(int argc, char *argv[]) {
         }
         first_launch = false;
 
-        state.window = std::make_unique<eka2l1::sdl::emu_window_sdl2>();
+        // Show the emulator window for the running app
+        SDL_ShowWindow(state.window->get_sdl_window());
+        SDL_RaiseWindow(state.window->get_sdl_window());
 
-        state.window->raw_mouse_event = eka2l1::sdl::on_mouse_evt;
-        state.window->button_pressed = eka2l1::sdl::on_key_press;
-        state.window->button_released = eka2l1::sdl::on_key_release;
-
-        state.window->init("EKA2L1", eka2l1::vec2(800, 600), eka2l1::drivers::emu_window_flag_maximum_size);
-        state.window->set_userdata(&state);
-        state.window->close_hook = [](void *userdata) {
-            auto *s = reinterpret_cast<eka2l1::sdl::emulator_state *>(userdata);
-            s->should_emu_quit.store(true);
-        };
-
-        state.graphics_event.reset();
-        std::thread graphics_thread_obj(eka2l1::sdl::graphics_driver_thread, std::ref(state));
+        state.app_exited.store(false);
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             state.window->poll_events();
@@ -1368,34 +1378,22 @@ int main(int argc, char *argv[]) {
         }
 
         bool user_quit = state.should_emu_quit.load() || state.window->should_quit();
-
-        // Pause the OS thread so we can safely tear down graphics
-        state.should_emu_pause.store(true);
-        eka2l1::kernel_system *kern = state.symsys ? state.symsys->get_kernel_system() : nullptr;
-        if (kern)
-            kern->stop_cores_idling();
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-        // Stop the graphics driver and join its thread
-        if (state.graphics_driver)
-            state.graphics_driver->abort();
-        state.graphics_event.set();
-        graphics_thread_obj.join();
-
-        // Destroy the emulator window
-        state.window.reset();
-
-        // Resume the OS thread
-        state.should_emu_pause.store(false);
-        state.pause_event.set();
-
         if (user_quit)
             break;
 
-        state.app_exited.store(false);
+        // App exited: hide emulator window and go back to launcher
+        SDL_HideWindow(state.window->get_sdl_window());
     }
 
+    // Final cleanup: tear down graphics driver, OS thread, window
     eka2l1::sdl::kill_emulator(state);
+
+    if (state.graphics_driver)
+        state.graphics_driver->abort();
+    state.graphics_event.set();
+    graphics_thread_obj.join();
+
+    state.window.reset();
     os_thread_obj.join();
 
     SDL_Quit();
