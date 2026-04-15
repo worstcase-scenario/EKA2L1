@@ -706,11 +706,9 @@ namespace eka2l1::sdl {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
                 emu->app_exited.store(false);
-                kernel::uid thread_id = 0;
-                svr->launch_app(*registry, cmd, &thread_id, [emu](kernel::process *) {
+                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *) {
                     emu->app_exited.store(true);
                 });
-                emu->app_launch_thread_id.store(thread_id);
                 emu->app_launch_from_command_line = true;
                 return true;
             }
@@ -730,8 +728,6 @@ namespace eka2l1::sdl {
             pr->logon([emu](kernel::process *) {
                 emu->app_exited.store(true);
             });
-            auto primary = pr->get_primary_thread();
-            emu->app_launch_thread_id.store(primary ? primary->unique_id() : 0);
             pr->run();
             emu->app_launch_from_command_line = true;
             return true;
@@ -744,11 +740,9 @@ namespace eka2l1::sdl {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
                 emu->app_exited.store(false);
-                kernel::uid thread_id = 0;
-                svr->launch_app(reg, cmd, &thread_id, [emu](kernel::process *) {
+                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *) {
                     emu->app_exited.store(true);
                 });
-                emu->app_launch_thread_id.store(thread_id);
                 emu->app_launch_from_command_line = true;
                 return true;
             }
@@ -1646,33 +1640,6 @@ int main(int argc, char *argv[]) {
             if (eka2l1::sdl::process_termination_requested.load()) {
                 state.should_emu_quit.store(true);
                 break;
-            }
-
-            if (state.app_launch_from_command_line && !state.app_exited.load()) {
-                kernel::uid launch_thread_id = state.app_launch_thread_id.load();
-                if (launch_thread_id != 0) {
-                    kernel_system *kern = state.symsys ? state.symsys->get_kernel_system() : nullptr;
-                    if (kern && !kern->get_by_id<kernel::thread>(launch_thread_id)) {
-                        state.app_exited.store(true);
-                        break;
-                    }
-                }
-
-                if (state.winserv) {
-                    if (state.winserv->get_focus() == nullptr) {
-                        cli_no_focus_ticks++;
-                    } else {
-                        cli_no_focus_ticks = 0;
-                    }
-
-                    // Some launchers (e.g. N-Gage 2 "Games") keep process objects alive briefly
-                    // while tearing down UI. If no focused window group exists for a while,
-                    // treat the session as exited.
-                    if (cli_no_focus_ticks > 2000) {
-                        state.app_exited.store(true);
-                        break;
-                    }
-                }
             }
 
             state.window->poll_events();
