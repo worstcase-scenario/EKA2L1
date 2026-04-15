@@ -97,6 +97,7 @@ namespace eka2l1::sdl {
         std::atomic<bool> should_emu_pause{false};
         std::atomic<bool> stage_two_inited{false};
         std::atomic<bool> app_exited{false};
+        std::atomic<kernel::uid> app_launch_thread_id{0};
 
         bool app_launch_from_command_line = false;
 
