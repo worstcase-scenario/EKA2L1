@@ -704,7 +704,10 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, nullptr);
+                emu->app_exited.store(false);
+                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *) {
+                    emu->app_exited.store(true);
+                });
                 emu->app_launch_from_command_line = true;
                 return true;
             }
@@ -720,6 +723,10 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
+            emu->app_exited.store(false);
+            pr->logon([emu](kernel::process *) {
+                emu->app_exited.store(true);
+            });
             pr->run();
             emu->app_launch_from_command_line = true;
             return true;
@@ -731,7 +738,10 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, nullptr);
+                emu->app_exited.store(false);
+                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *) {
+                    emu->app_exited.store(true);
+                });
                 emu->app_launch_from_command_line = true;
                 return true;
             }
@@ -1643,6 +1653,10 @@ int main(int argc, char *argv[]) {
         bool user_quit = state.should_emu_quit.load() || state.window->should_quit();
         if (user_quit)
             break;
+
+        if (state.app_launch_from_command_line && state.app_exited.load()) {
+            break;
+        }
 
         // App exited: hide emulator window and go back to launcher
         SDL_HideWindow(state.window->get_sdl_window());
