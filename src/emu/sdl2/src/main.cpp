@@ -69,6 +69,7 @@
 #include <gdbstub/gdbstub.h>
 
 #include <atomic>
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -78,6 +79,12 @@
 #include <SDL2/SDL_ttf.h>
 
 namespace eka2l1::sdl {
+    static std::atomic<bool> process_termination_requested{ false };
+
+    static void handle_process_termination_signal(int) {
+        process_termination_requested.store(true);
+    }
+
     struct emulator_state {
         std::unique_ptr<system> symsys;
         std::unique_ptr<drivers::graphics_driver> graphics_driver;
@@ -1212,6 +1219,11 @@ namespace eka2l1::sdl {
         bool running = true;
 
         while (running) {
+            if (process_termination_requested.load()) {
+                state.should_emu_quit.store(true);
+                break;
+            }
+
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
                 if (ev.type == SDL_QUIT) {
@@ -1368,10 +1380,17 @@ namespace eka2l1::sdl {
         int total_count = static_cast<int>(apps.size());
 
         while (running) {
+            if (process_termination_requested.load()) {
+                state.should_emu_quit.store(true);
+                running = false;
+                break;
+            }
+
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 switch (event.type) {
                 case SDL_QUIT:
+                    state.should_emu_quit.store(true);
                     running = false;
                     break;
                 case SDL_KEYDOWN:
@@ -1520,6 +1539,9 @@ namespace eka2l1::sdl {
 }  // namespace eka2l1::sdl
 
 int main(int argc, char *argv[]) {
+    std::signal(SIGINT, eka2l1::sdl::handle_process_termination_signal);
+    std::signal(SIGTERM, eka2l1::sdl::handle_process_termination_signal);
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;
@@ -1584,6 +1606,11 @@ int main(int argc, char *argv[]) {
     bool first_launch = true;
 
     while (true) {
+        if (eka2l1::sdl::process_termination_requested.load()) {
+            state.should_emu_quit.store(true);
+            break;
+        }
+
         if (!state.app_launch_from_command_line || !first_launch) {
             if (!eka2l1::sdl::show_app_launcher(state)) {
                 break;
@@ -1598,6 +1625,11 @@ int main(int argc, char *argv[]) {
         state.app_exited.store(false);
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
+            if (eka2l1::sdl::process_termination_requested.load()) {
+                state.should_emu_quit.store(true);
+                break;
+            }
+
             state.window->poll_events();
 
             if (state.show_osd_requested.load()) {
