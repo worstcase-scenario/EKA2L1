@@ -1634,6 +1634,7 @@ int main(int argc, char *argv[]) {
         SDL_RaiseWindow(state.window->get_sdl_window());
 
         state.app_exited.store(false);
+        int cli_no_focus_ticks = 0;
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
