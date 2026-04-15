@@ -280,7 +280,8 @@ namespace eka2l1::epoc {
     void window_server_client::restore_hotkey(service::ipc_context &ctx, ws_cmd &cmd) {
         THotKey key = *reinterpret_cast<THotKey *>(cmd.data_ptr);
 
-        LOG_WARN(SERVICE_WINDOW, "Unknown restore key op.");
+        LOG_TRACE(SERVICE_WINDOW, "Restore default hotkey request: {}", static_cast<int>(key));
+        ctx.complete(epoc::error_none);
     }
 
     void window_server_client::create_window_group(service::ipc_context &ctx, ws_cmd &cmd) {
