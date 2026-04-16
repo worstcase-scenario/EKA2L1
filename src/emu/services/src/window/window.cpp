@@ -1251,6 +1251,7 @@ namespace eka2l1::epoc {
 
         default:
             LOG_INFO(SERVICE_WINDOW, "Unimplemented ClOp: 0x{:x}", cmd.header.op);
+            ctx.complete(epoc::error_not_supported);
             break;
         }
     }
