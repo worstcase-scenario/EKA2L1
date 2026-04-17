@@ -2169,14 +2169,13 @@ namespace eka2l1 {
 
         clients.emplace(ctx.msg->msg_session->unique_id(),
             std::make_unique<epoc::window_server_client>(ctx.msg->msg_session, ctx.msg->own_thr, the_ver.value()));
-        had_clients_connected = true;
 
         server::connect(ctx);
     }
 
     void window_server::disconnect(service::ipc_context &ctx) {
         clients.erase(ctx.msg->msg_session->unique_id());
-        if (clients.empty() && had_clients_connected && on_all_clients_disconnected) {
+        if (clients.empty() && on_all_clients_disconnected) {
             on_all_clients_disconnected();
         }
         server::disconnect(ctx);

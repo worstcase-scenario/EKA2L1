@@ -714,7 +714,7 @@ namespace eka2l1::sdl {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
                 svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *) {
-                    if (!emu->winserv || emu->winserv->had_clients_connected)
+                    if (emu->app_started.load())
                         std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
@@ -733,7 +733,7 @@ namespace eka2l1::sdl {
                 return false;
             }
             pr->logon([emu](kernel::process *) {
-                if (!emu->winserv || emu->winserv->had_clients_connected)
+                if (emu->app_started.load())
                     std::exit(0);
             });
             pr->run();
@@ -748,7 +748,7 @@ namespace eka2l1::sdl {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
                 svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *) {
-                    if (!emu->winserv || emu->winserv->had_clients_connected)
+                    if (emu->app_started.load())
                         std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
