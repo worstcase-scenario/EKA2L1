@@ -1657,7 +1657,7 @@ int main(int argc, char *argv[]) {
                 wg_last_check = now;
                 const std::lock_guard<std::mutex> guard(state.lockdown);
                 if (state.winserv) {
-                    epoc::screen *scr = state.winserv->get_screens();
+                    eka2l1::epoc::screen *scr = state.winserv->get_screens();
                     bool any_focus = false;
                     while (scr) {
                         if (scr->focus != nullptr) { any_focus = true; break; }
