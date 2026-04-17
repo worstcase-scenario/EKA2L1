@@ -69,6 +69,7 @@
 #include <gdbstub/gdbstub.h>
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <iostream>
 #include <memory>
@@ -1631,6 +1632,10 @@ int main(int argc, char *argv[]) {
 
         state.app_exited.store(false);
 
+        // Grace period: don't check window groups until the app has had time to open its window
+        auto wg_check_start = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        auto wg_last_check  = std::chrono::steady_clock::now();
+
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
                 state.should_emu_quit.store(true);
@@ -1642,6 +1647,25 @@ int main(int argc, char *argv[]) {
             if (state.show_osd_requested.load()) {
                 state.show_osd_requested.store(false);
                 eka2l1::sdl::show_osd_menu(state);
+            }
+
+            // Watchdog: if no window group has focus, the app has exited its UI.
+            // Covers frozen processes (e.g. N-Gage 2.0 Games) that never terminate cleanly.
+            auto now = std::chrono::steady_clock::now();
+            if (now >= wg_check_start &&
+                now - wg_last_check >= std::chrono::milliseconds(500)) {
+                wg_last_check = now;
+                const std::lock_guard<std::mutex> guard(state.lockdown);
+                if (state.winserv) {
+                    epoc::screen *scr = state.winserv->get_screens();
+                    bool any_focus = false;
+                    while (scr) {
+                        if (scr->focus != nullptr) { any_focus = true; break; }
+                        scr = scr->next;
+                    }
+                    if (!any_focus)
+                        std::exit(0);
+                }
             }
 
             SDL_Delay(1);
