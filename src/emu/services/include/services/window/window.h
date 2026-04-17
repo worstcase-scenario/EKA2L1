@@ -343,6 +343,7 @@ namespace eka2l1 {
 
         void delete_key_mapping(const std::uint32_t target);
         std::function<void()> on_all_clients_disconnected;
+        bool had_clients_connected{ false };
 
     private:
         friend class epoc::window_server_client;
