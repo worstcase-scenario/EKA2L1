@@ -711,8 +711,9 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, [](kernel::process *) {
-                    std::exit(0);
+                svr->launch_app(*registry, cmd, nullptr, [&state](kernel::process *) {
+                    if (state.last_draw_ms.load() > 0)
+                        std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -729,8 +730,9 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
-            pr->logon([](kernel::process *) {
-                std::exit(0);
+            pr->logon([&state](kernel::process *) {
+                if (state.last_draw_ms.load() > 0)
+                    std::exit(0);
             });
             pr->run();
             emu->app_launch_from_command_line = true;
@@ -743,8 +745,9 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, [](kernel::process *) {
-                    std::exit(0);
+                svr->launch_app(reg, cmd, nullptr, [&state](kernel::process *) {
+                    if (state.last_draw_ms.load() > 0)
+                        std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
