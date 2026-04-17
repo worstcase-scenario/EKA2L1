@@ -285,6 +285,12 @@ namespace eka2l1::sdl {
         winserv = reinterpret_cast<window_server *>(the_sys->get_kernel_system()->get_by_name<service::server>(
             get_winserv_name_by_epocver(symsys->get_symbian_version_use())));
 
+        if (winserv) {
+            winserv->on_all_clients_disconnected = []() {
+                std::exit(0);
+            };
+        }
+
         if (stage_two_inited) {
             register_draw_callback();
             symsys->initialize_user_parties();

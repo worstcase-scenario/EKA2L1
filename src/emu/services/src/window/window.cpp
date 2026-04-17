@@ -2175,6 +2175,9 @@ namespace eka2l1 {
 
     void window_server::disconnect(service::ipc_context &ctx) {
         clients.erase(ctx.msg->msg_session->unique_id());
+        if (clients.empty() && on_all_clients_disconnected) {
+            on_all_clients_disconnected();
+        }
         server::disconnect(ctx);
     }
 

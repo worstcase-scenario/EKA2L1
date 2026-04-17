@@ -29,6 +29,7 @@
 #include <set>
 #include <type_traits>
 #include <unordered_map>
+#include <functional>
 #include <unordered_set>
 #include <vector>
 
@@ -348,6 +349,7 @@ namespace eka2l1 {
 
         std::unordered_map<std::uint64_t, std::unique_ptr<epoc::window_server_client>>
             clients;
+        std::function<void()> on_all_clients_disconnected;
 
         common::ini_file ws_config;
         bool loaded{ false };
