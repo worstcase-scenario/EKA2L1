@@ -1643,6 +1643,7 @@ int main(int argc, char *argv[]) {
 
         // Grace period: don't check window groups until the app has had time to open its window
         auto wg_check_start = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        auto launch_time    = std::chrono::steady_clock::now();
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
@@ -1657,15 +1658,20 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
-            // Watchdog: exit if the screen has not been redrawn for 3 seconds.
-            // Catches frozen apps (e.g. N-Gage 2.0 Games) that never terminate cleanly.
+            // Watchdog: exit if the screen has not been redrawn for 3 seconds (freeze),
+            // or if the app never drew anything within 10 seconds (startup crash).
             auto now = std::chrono::steady_clock::now();
             if (now >= wg_check_start) {
                 std::uint64_t last = state.last_draw_ms.load();
                 if (last > 0) {
+                    // App drew at least one frame — check for freeze
                     auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         now.time_since_epoch()).count();
                     if (now_ms - static_cast<std::int64_t>(last) > 3000)
+                        std::exit(0);
+                } else {
+                    // App never drew anything — startup crash/hang timeout
+                    if (now - launch_time > std::chrono::seconds(10))
                         std::exit(0);
                 }
             }
