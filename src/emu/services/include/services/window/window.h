@@ -342,6 +342,7 @@ namespace eka2l1 {
         } input_mapping;
 
         void delete_key_mapping(const std::uint32_t target);
+        std::function<void()> on_all_clients_disconnected;
 
     private:
         friend class epoc::window_server_client;
@@ -349,7 +350,6 @@ namespace eka2l1 {
 
         std::unordered_map<std::uint64_t, std::unique_ptr<epoc::window_server_client>>
             clients;
-        std::function<void()> on_all_clients_disconnected;
 
         common::ini_file ws_config;
         bool loaded{ false };
