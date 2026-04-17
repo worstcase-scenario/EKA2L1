@@ -69,7 +69,6 @@
 #include <gdbstub/gdbstub.h>
 
 #include <atomic>
-#include <chrono>
 #include <csignal>
 #include <iostream>
 #include <memory>
@@ -116,7 +115,6 @@ namespace eka2l1::sdl {
         std::atomic<bool> show_osd_requested{false};
 
         std::atomic<bool> osd_visible{false};
-        std::atomic<std::uint64_t> last_draw_ms{0};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -309,11 +307,6 @@ namespace eka2l1::sdl {
     }
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
-        // Update draw timestamp for freeze detection
-        auto draw_now = std::chrono::steady_clock::now().time_since_epoch();
-        state->last_draw_ms.store(
-            std::chrono::duration_cast<std::chrono::milliseconds>(draw_now).count());
-
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
@@ -711,9 +704,8 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *) {
-                    if (emu->last_draw_ms.load() > 0)
-                        std::exit(0);
+                svr->launch_app(*registry, cmd, nullptr, [](kernel::process *) {
+                    std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -730,9 +722,8 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
-            pr->logon([emu](kernel::process *) {
-                if (emu->last_draw_ms.load() > 0)
-                    std::exit(0);
+            pr->logon([](kernel::process *) {
+                std::exit(0);
             });
             pr->run();
             emu->app_launch_from_command_line = true;
@@ -745,9 +736,8 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *) {
-                    if (emu->last_draw_ms.load() > 0)
-                        std::exit(0);
+                svr->launch_app(reg, cmd, nullptr, [](kernel::process *) {
+                    std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -1642,9 +1632,6 @@ int main(int argc, char *argv[]) {
         state.app_exited.store(false);
 
         // Grace period: don't check window groups until the app has had time to open its window
-        auto wg_check_start = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-        auto launch_time    = std::chrono::steady_clock::now();
-
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
                 state.should_emu_quit.store(true);
@@ -1656,24 +1643,6 @@ int main(int argc, char *argv[]) {
             if (state.show_osd_requested.load()) {
                 state.show_osd_requested.store(false);
                 eka2l1::sdl::show_osd_menu(state);
-            }
-
-            // Watchdog: exit if the screen has not been redrawn for 3 seconds (freeze),
-            // or if the app never drew anything within 10 seconds (startup crash).
-            auto now = std::chrono::steady_clock::now();
-            if (now >= wg_check_start) {
-                std::uint64_t last = state.last_draw_ms.load();
-                if (last > 0) {
-                    // App drew at least one frame — check for freeze
-                    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        now.time_since_epoch()).count();
-                    if (now_ms - static_cast<std::int64_t>(last) > 3000)
-                        std::exit(0);
-                } else {
-                    // App never drew anything — startup crash/hang timeout
-                    if (now - launch_time > std::chrono::seconds(10))
-                        std::exit(0);
-                }
             }
 
             SDL_Delay(1);
