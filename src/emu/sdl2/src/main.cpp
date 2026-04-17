@@ -116,6 +116,7 @@ namespace eka2l1::sdl {
         std::atomic<bool> show_osd_requested{false};
 
         std::atomic<bool> osd_visible{false};
+        std::atomic<std::uint64_t> last_draw_ms{0};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -308,6 +309,11 @@ namespace eka2l1::sdl {
     }
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
+        // Update draw timestamp for freeze detection
+        auto draw_now = std::chrono::steady_clock::now().time_since_epoch();
+        state->last_draw_ms.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(draw_now).count());
+
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
@@ -1634,7 +1640,6 @@ int main(int argc, char *argv[]) {
 
         // Grace period: don't check window groups until the app has had time to open its window
         auto wg_check_start = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-        auto wg_last_check  = std::chrono::steady_clock::now();
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
@@ -1649,21 +1654,15 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
-            // Watchdog: if no window group has focus, the app has exited its UI.
-            // Covers frozen processes (e.g. N-Gage 2.0 Games) that never terminate cleanly.
+            // Watchdog: exit if the screen has not been redrawn for 3 seconds.
+            // Catches frozen apps (e.g. N-Gage 2.0 Games) that never terminate cleanly.
             auto now = std::chrono::steady_clock::now();
-            if (now >= wg_check_start &&
-                now - wg_last_check >= std::chrono::milliseconds(500)) {
-                wg_last_check = now;
-                const std::lock_guard<std::mutex> guard(state.lockdown);
-                if (state.winserv) {
-                    eka2l1::epoc::screen *scr = state.winserv->get_screens();
-                    bool any_focus = false;
-                    while (scr) {
-                        if (scr->focus != nullptr) { any_focus = true; break; }
-                        scr = scr->next;
-                    }
-                    if (!any_focus)
+            if (now >= wg_check_start) {
+                std::uint64_t last = state.last_draw_ms.load();
+                if (last > 0) {
+                    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now.time_since_epoch()).count();
+                    if (now_ms - static_cast<std::int64_t>(last) > 3000)
                         std::exit(0);
                 }
             }
