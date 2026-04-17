@@ -115,6 +115,7 @@ namespace eka2l1::sdl {
         std::atomic<bool> show_osd_requested{false};
 
         std::atomic<bool> osd_visible{false};
+        std::atomic<bool> app_started{false};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -286,8 +287,9 @@ namespace eka2l1::sdl {
             get_winserv_name_by_epocver(symsys->get_symbian_version_use())));
 
         if (winserv) {
-            winserv->on_all_clients_disconnected = []() {
-                std::exit(0);
+            winserv->on_all_clients_disconnected = [this]() {
+                if (app_started.load())
+                    std::exit(0);
             };
         }
 
@@ -313,6 +315,7 @@ namespace eka2l1::sdl {
     }
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
+        state->app_started.store(true);
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
@@ -710,8 +713,9 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, [](kernel::process *) {
-                    std::exit(0);
+                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *) {
+                    if (!emu->winserv || emu->winserv->had_clients_connected)
+                        std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -728,8 +732,9 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
-            pr->logon([](kernel::process *) {
-                std::exit(0);
+            pr->logon([emu](kernel::process *) {
+                if (!emu->winserv || emu->winserv->had_clients_connected)
+                    std::exit(0);
             });
             pr->run();
             emu->app_launch_from_command_line = true;
@@ -742,8 +747,9 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, [](kernel::process *) {
-                    std::exit(0);
+                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *) {
+                    if (!emu->winserv || emu->winserv->had_clients_connected)
+                        std::exit(0);
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
