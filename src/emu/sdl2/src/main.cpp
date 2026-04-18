@@ -283,9 +283,7 @@ namespace eka2l1::sdl {
     }
 
     void emulator_state::on_system_reset(system *the_sys) {
-        eka2l1::kernel_system *kern = the_sys->get_kernel_system();
-
-        winserv = reinterpret_cast<window_server *>(kern->get_by_name<service::server>(
+        winserv = reinterpret_cast<window_server *>(the_sys->get_kernel_system()->get_by_name<service::server>(
             get_winserv_name_by_epocver(symsys->get_symbian_version_use())));
 
         if (winserv) {
@@ -294,16 +292,6 @@ namespace eka2l1::sdl {
                     std::exit(0);
             };
         }
-
-        // Hook into process creation so we can register logon on playserver
-        // regardless of whether it was launched via command line or auto-started.
-        kern->on_process_added = [](eka2l1::kernel::process *pr) {
-            if (pr && pr->name() == "playserver") {
-                pr->logon([](eka2l1::kernel::process *) {
-                    std::exit(0);
-                });
-            }
-        };
 
         if (stage_two_inited) {
             register_draw_callback();
