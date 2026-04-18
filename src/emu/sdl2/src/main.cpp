@@ -116,6 +116,7 @@ namespace eka2l1::sdl {
 
         std::atomic<bool> osd_visible{false};
         std::atomic<bool> app_started{false};
+        std::atomic<bool> playserver_seen{false};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -1663,6 +1664,21 @@ int main(int argc, char *argv[]) {
             if (state.show_osd_requested.load()) {
                 state.show_osd_requested.store(false);
                 eka2l1::sdl::show_osd_menu(state);
+            }
+
+            // Poll for playserver process. Exit when it disappears after being seen.
+            // This covers both normal exit (forceful kill bypasses IPC disconnect)
+            // and startup crashes (playserver crashes before first frame).
+            if (state.symsys) {
+                kernel_system *kern = state.symsys->get_kernel_system();
+                if (kern) {
+                    bool alive = (kern->get_by_name<kernel::process>("playserver") != nullptr);
+                    if (alive) {
+                        state.playserver_seen.store(true);
+                    } else if (state.playserver_seen.load()) {
+                        std::exit(0);
+                    }
+                }
             }
 
             SDL_Delay(1);
