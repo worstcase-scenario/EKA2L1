@@ -316,6 +316,14 @@ namespace eka2l1::sdl {
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
         state->app_started.store(true);
+        // Register disconnect callback here in case winserv was null during on_system_reset
+        // (which happens in --app mode where stage_two() hasn't run yet at reset time)
+        if (state->winserv && !state->winserv->on_all_clients_disconnected) {
+            state->winserv->on_all_clients_disconnected = [state]() {
+                if (state->app_started.load())
+                    std::exit(0);
+            };
+        }
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
