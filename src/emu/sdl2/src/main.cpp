@@ -1670,9 +1670,9 @@ int main(int argc, char *argv[]) {
             // This covers both normal exit (forceful kill bypasses IPC disconnect)
             // and startup crashes (playserver crashes before first frame).
             if (state.symsys) {
-                kernel_system *kern = state.symsys->get_kernel_system();
+                eka2l1::kernel_system *kern = state.symsys->get_kernel_system();
                 if (kern) {
-                    bool alive = (kern->get_by_name<kernel::process>("playserver") != nullptr);
+                    bool alive = (kern->get_by_name<eka2l1::kernel::process>("playserver") != nullptr);
                     if (alive) {
                         state.playserver_seen.store(true);
                     } else if (state.playserver_seen.load()) {
