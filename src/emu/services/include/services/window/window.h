@@ -343,6 +343,7 @@ namespace eka2l1 {
 
         void delete_key_mapping(const std::uint32_t target);
         std::function<void()> on_all_clients_disconnected;
+        std::uint64_t watched_session_id{0}; ///< Session ID of the launched app to watch for disconnect.
 
     private:
         friend class epoc::window_server_client;

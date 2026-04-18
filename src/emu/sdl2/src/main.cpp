@@ -116,7 +116,6 @@ namespace eka2l1::sdl {
 
         std::atomic<bool> osd_visible{false};
         std::atomic<bool> app_started{false};
-        std::atomic<bool> playserver_seen{false};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -317,14 +316,6 @@ namespace eka2l1::sdl {
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
         state->app_started.store(true);
-        // Register disconnect callback here in case winserv was null during on_system_reset
-        // (which happens in --app mode where stage_two() hasn't run yet at reset time)
-        if (state->winserv && !state->winserv->on_all_clients_disconnected) {
-            state->winserv->on_all_clients_disconnected = [state]() {
-                if (state->app_started.load())
-                    std::exit(0);
-            };
-        }
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
@@ -1666,20 +1657,6 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
-            // Poll for playserver process. Exit when it disappears after being seen.
-            // This covers both normal exit (forceful kill bypasses IPC disconnect)
-            // and startup crashes (playserver crashes before first frame).
-            if (state.symsys) {
-                eka2l1::kernel_system *kern = state.symsys->get_kernel_system();
-                if (kern) {
-                    bool alive = (kern->get_by_name<eka2l1::kernel::process>("playserver") != nullptr);
-                    if (alive) {
-                        state.playserver_seen.store(true);
-                    } else if (state.playserver_seen.load()) {
-                        std::exit(0);
-                    }
-                }
-            }
 
             SDL_Delay(1);
         }
