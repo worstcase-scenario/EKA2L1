@@ -283,7 +283,9 @@ namespace eka2l1::sdl {
     }
 
     void emulator_state::on_system_reset(system *the_sys) {
-        winserv = reinterpret_cast<window_server *>(the_sys->get_kernel_system()->get_by_name<service::server>(
+        eka2l1::kernel_system *kern = the_sys->get_kernel_system();
+
+        winserv = reinterpret_cast<window_server *>(kern->get_by_name<service::server>(
             get_winserv_name_by_epocver(symsys->get_symbian_version_use())));
 
         if (winserv) {
@@ -292,6 +294,16 @@ namespace eka2l1::sdl {
                     std::exit(0);
             };
         }
+
+        // Hook into process creation so we can register logon on playserver
+        // regardless of whether it was launched via command line or auto-started.
+        kern->on_process_added = [](eka2l1::kernel::process *pr) {
+            if (pr && pr->name() == "playserver") {
+                pr->logon([](eka2l1::kernel::process *) {
+                    std::exit(0);
+                });
+            }
+        };
 
         if (stage_two_inited) {
             register_draw_callback();
@@ -713,9 +725,8 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *) {
-                    if (emu->app_started.load())
-                        std::exit(0);
+                svr->launch_app(*registry, cmd, nullptr, [](kernel::process *pr) {
+                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -732,9 +743,8 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
-            pr->logon([emu](kernel::process *) {
-                if (emu->app_started.load())
-                    std::exit(0);
+            pr->logon([](kernel::process *) {
+                std::exit(0);
             });
             pr->run();
             emu->app_launch_from_command_line = true;
@@ -747,9 +757,8 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *) {
-                    if (emu->app_started.load())
-                        std::exit(0);
+                svr->launch_app(reg, cmd, nullptr, [](kernel::process *pr) {
+                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
