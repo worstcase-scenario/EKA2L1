@@ -117,6 +117,7 @@ namespace eka2l1::sdl {
         std::atomic<bool> osd_visible{false};
         std::atomic<bool> app_started{false};
         std::atomic<std::uint32_t> last_draw_tick{0};
+        std::atomic<int> draw_frame_count{0};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -311,7 +312,13 @@ namespace eka2l1::sdl {
     }
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
-        state->app_started.store(true);
+        // Only mark the app as "stably running" after 30 rendered frames.
+        // This prevents the 2-second inactivity timer from firing during the
+        // long N-Gage 2.0 init phase (DLL loads, DB opens, etc.) where the
+        // emulator may draw one early frame and then go quiet for several seconds.
+        const int fc = state->draw_frame_count.fetch_add(1) + 1;
+        if (fc >= 30)
+            state->app_started.store(true);
         state->last_draw_tick.store(SDL_GetTicks());
         state->graphics_driver->wait_for(&state->present_status);
 
@@ -1639,8 +1646,11 @@ int main(int argc, char *argv[]) {
 
         // For N-Gage 2.0 (playserver): ngiplay0x20003b78 does NOT die on EXIT —
         // it just closes its windows. Detect exit by screen inactivity:
-        // once the first frame has been drawn (app_started) and no further
+        // once 30+ frames have been drawn (app_started) and no further
         // draw callbacks fire for 2 seconds, the user has exited.
+        // Reset all counters so a fresh launch starts clean.
+        state.app_started.store(false);
+        state.draw_frame_count.store(0);
         state.last_draw_tick.store(0);
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
