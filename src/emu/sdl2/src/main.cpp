@@ -117,6 +117,7 @@ namespace eka2l1::sdl {
         std::atomic<bool> osd_visible{false};
         std::atomic<bool> app_started{false};
         std::atomic<std::uint32_t> last_draw_tick{0};
+        std::atomic<std::uint32_t> last_input_tick{0};
         std::atomic<int> draw_frame_count{0};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
@@ -515,6 +516,7 @@ namespace eka2l1::sdl {
             return;
         }
 
+        emu->last_input_tick.store(SDL_GetTicks());
         key = remap_arrow_for_rotation(key, emu->host_rotation.load());
         auto evt = make_key_event_driver(static_cast<int>(key), drivers::key_state::pressed);
 
@@ -713,8 +715,10 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, [](kernel::process *pr) {
-                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
+                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *pr) {
+                    if (pr) pr->logon([emu](kernel::process *) {
+                        emu->app_exited.store(true);
+                    });
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -731,8 +735,8 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
-            pr->logon([](kernel::process *) {
-                std::exit(0);
+            pr->logon([emu](kernel::process *) {
+                emu->app_exited.store(true);
             });
             pr->run();
             emu->app_launch_from_command_line = true;
@@ -745,8 +749,10 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, [](kernel::process *pr) {
-                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
+                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *pr) {
+                    if (pr) pr->logon([emu](kernel::process *) {
+                        emu->app_exited.store(true);
+                    });
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -1686,6 +1692,7 @@ int main(int argc, char *argv[]) {
         state.app_started.store(false);
         state.draw_frame_count.store(0);
         state.last_draw_tick.store(0);
+        state.last_input_tick.store(0);
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
@@ -1700,14 +1707,32 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
-            // Screen-inactivity exit: app has started and no frame for 15 s.
-            // 15 seconds gives the N-Gage 2.0 platform enough time to finish
-            // its heavy post-splash initialization (DB opens, DLL loads) without
-            // the timer firing during that quiet period.
-            std::uint32_t last_tick = state.last_draw_tick.load();
-            if (state.app_started.load() && last_tick != 0 &&
-                    (SDL_GetTicks() - last_tick) > 15000) {
-                state.app_exited.store(true);
+            // Exit detection for apps that don't terminate their Symbian process
+            // (e.g. N-Gage 2.0 platform). Apps that DO die will have already set
+            // app_exited via the logon callback above.
+            //
+            // Two-phase logic:
+            //   - If the user pressed a key recently (within 60 s) and drawing has
+            //     stopped for 5 s → user pressed EXIT and the app is shutting down.
+            //   - Absolute fallback: no drawing for 5 minutes → exit regardless.
+            //
+            // This avoids auto-exiting while the user is simply idle in the menu
+            // (no input, event-driven UI = no frames drawn).
+            if (state.app_started.load()) {
+                const std::uint32_t now        = SDL_GetTicks();
+                const std::uint32_t last_draw  = state.last_draw_tick.load();
+                const std::uint32_t last_input = state.last_input_tick.load();
+
+                if (last_draw != 0) {
+                    const std::uint32_t draw_silence = now - last_draw;
+                    const bool had_recent_input =
+                        (last_input != 0) && (now - last_input < 60000u);
+
+                    if ((draw_silence > 5000u && had_recent_input) ||
+                            draw_silence > 300000u) {
+                        state.app_exited.store(true);
+                    }
+                }
             }
 
             SDL_Delay(1);
