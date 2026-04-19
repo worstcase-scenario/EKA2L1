@@ -116,7 +116,6 @@ namespace eka2l1::sdl {
 
         std::atomic<bool> osd_visible{false};
         std::atomic<bool> app_started{false};
-        std::atomic<std::uint32_t> last_draw_tick{0};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -284,10 +283,27 @@ namespace eka2l1::sdl {
     }
 
     void emulator_state::on_system_reset(system *the_sys) {
-        winserv = reinterpret_cast<window_server *>(the_sys->get_kernel_system()->get_by_name<service::server>(
+        eka2l1::kernel_system *kern = the_sys->get_kernel_system();
+
+        winserv = reinterpret_cast<window_server *>(kern->get_by_name<service::server>(
             get_winserv_name_by_epocver(symsys->get_symbian_version_use())));
 
-        // winserv available (not used for disconnect detection here)
+        if (winserv) {
+            winserv->on_all_clients_disconnected = [this]() {
+                if (app_started.load())
+                    std::exit(0);
+            };
+        }
+
+        // Hook into process creation so we can register logon on playserver
+        // regardless of whether it was launched via command line or auto-started.
+        kern->on_process_added = [](eka2l1::kernel::process *pr) {
+            if (pr && pr->name() == "playserver") {
+                pr->logon([](eka2l1::kernel::process *) {
+                    std::exit(0);
+                });
+            }
+        };
 
         if (stage_two_inited) {
             register_draw_callback();
@@ -312,7 +328,6 @@ namespace eka2l1::sdl {
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
         state->app_started.store(true);
-        state->last_draw_tick.store(SDL_GetTicks());
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
@@ -1637,12 +1652,7 @@ int main(int argc, char *argv[]) {
 
         state.app_exited.store(false);
 
-        // For N-Gage 2.0 (playserver): ngiplay0x20003b78 does NOT die on EXIT —
-        // it just closes its windows. Detect exit by screen inactivity:
-        // once the first frame has been drawn (app_started) and no further
-        // draw callbacks fire for 2 seconds, the user has exited.
-        state.last_draw_tick.store(0);
-
+        // Grace period: don't check window groups until the app has had time to open its window
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
                 state.should_emu_quit.store(true);
@@ -1656,12 +1666,6 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
-            // Screen-inactivity exit: app has started and no frame for 2 s.
-            std::uint32_t last_tick = state.last_draw_tick.load();
-            if (state.app_started.load() && last_tick != 0 &&
-                    (SDL_GetTicks() - last_tick) > 2000) {
-                state.app_exited.store(true);
-            }
 
             SDL_Delay(1);
         }
