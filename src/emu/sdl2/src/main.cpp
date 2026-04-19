@@ -91,6 +91,11 @@ namespace eka2l1::sdl {
         std::atomic<bool> stage_two_inited{false};
         std::atomic<bool> app_exited{false};
 
+        // Primary thread of the launched Symbian app — polled in the main loop
+        // to detect exit when the process itself does not die (classic N-Gage games).
+        std::shared_ptr<kernel::thread> watched_thread;
+        std::mutex watched_thread_mutex;
+
         bool app_launch_from_command_line = false;
 
         common::event graphics_event;
@@ -697,8 +702,14 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, [](kernel::process *pr) {
-                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
+                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *pr) {
+                    if (pr) {
+                        {
+                            std::lock_guard<std::mutex> g(emu->watched_thread_mutex);
+                            emu->watched_thread = pr->get_primary_thread();
+                        }
+                        pr->logon([](kernel::process *) { std::exit(0); });
+                    }
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -715,6 +726,10 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
+            {
+                std::lock_guard<std::mutex> g(emu->watched_thread_mutex);
+                emu->watched_thread = pr->get_primary_thread();
+            }
             pr->logon([](kernel::process *) { std::exit(0); });
             pr->run();
             emu->app_launch_from_command_line = true;
@@ -727,8 +742,14 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, [](kernel::process *pr) {
-                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
+                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *pr) {
+                    if (pr) {
+                        {
+                            std::lock_guard<std::mutex> g(emu->watched_thread_mutex);
+                            emu->watched_thread = pr->get_primary_thread();
+                        }
+                        pr->logon([](kernel::process *) { std::exit(0); });
+                    }
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -1623,6 +1644,10 @@ int main(int argc, char *argv[]) {
         SDL_RaiseWindow(state.window->get_sdl_window());
 
         state.app_exited.store(false);
+        {
+            std::lock_guard<std::mutex> g(state.watched_thread_mutex);
+            state.watched_thread.reset();
+        }
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             state.window->poll_events();
@@ -1630,6 +1655,18 @@ int main(int argc, char *argv[]) {
             if (state.show_osd_requested.load()) {
                 state.show_osd_requested.store(false);
                 eka2l1::sdl::show_osd_menu(state);
+            }
+
+            // Detect exit for classic N-Gage games: the process stays alive
+            // but the primary thread transitions to thread_state::stop when
+            // the player quits (threads are forcefully killed).
+            {
+                std::lock_guard<std::mutex> g(state.watched_thread_mutex);
+                if (state.watched_thread &&
+                        state.watched_thread->current_state() ==
+                            kernel::thread::thread_state::stop) {
+                    state.app_exited.store(true);
+                }
             }
 
             SDL_Delay(1);
