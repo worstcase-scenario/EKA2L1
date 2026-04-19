@@ -1683,12 +1683,6 @@ int main(int argc, char *argv[]) {
         SDL_RaiseWindow(state.window->get_sdl_window());
 
         state.app_exited.store(false);
-
-        // For N-Gage 2.0 (playserver): ngiplay0x20003b78 does NOT die on EXIT —
-        // it just closes its windows. Detect exit by screen inactivity:
-        // once 30+ frames have been drawn (app_started) and no further
-        // draw callbacks fire for 2 seconds, the user has exited.
-        // Reset all counters so a fresh launch starts clean.
         state.app_started.store(false);
         state.draw_frame_count.store(0);
         state.last_draw_tick.store(0);
@@ -1706,10 +1700,13 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
-            // Screen-inactivity exit: app has started and no frame for 2 s.
+            // Screen-inactivity exit: app has started and no frame for 15 s.
+            // 15 seconds gives the N-Gage 2.0 platform enough time to finish
+            // its heavy post-splash initialization (DB opens, DLL loads) without
+            // the timer firing during that quiet period.
             std::uint32_t last_tick = state.last_draw_tick.load();
             if (state.app_started.load() && last_tick != 0 &&
-                    (SDL_GetTicks() - last_tick) > 2000) {
+                    (SDL_GetTicks() - last_tick) > 15000) {
                 state.app_exited.store(true);
             }
 
