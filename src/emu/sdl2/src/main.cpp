@@ -1639,6 +1639,10 @@ int main(int argc, char *argv[]) {
         if (user_quit)
             break;
 
+        if (state.app_launch_from_command_line && state.app_exited.load()) {
+            break;
+        }
+
         // App exited: hide emulator window and go back to launcher
         SDL_HideWindow(state.window->get_sdl_window());
     }
