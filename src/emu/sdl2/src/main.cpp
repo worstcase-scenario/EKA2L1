@@ -1640,6 +1640,12 @@ int main(int argc, char *argv[]) {
 
         state.app_exited.store(false);
 
+        // For N-Gage 2.0 (playserver): track ngiplay* child process.
+        // playserver.exe never exits so pr->logon() never fires.
+        // Instead we poll for the ngiplay* UI process and exit when it disappears.
+        bool ngiplay_seen = false;
+        int poll_counter = 0;
+
         // Grace period: don't check window groups until the app has had time to open its window
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
@@ -1654,6 +1660,20 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
+            // Poll every ~500ms for ngiplay* process existence.
+            if (state.symsys && (++poll_counter % 500 == 0)) {
+                kernel_system *kern = state.symsys->get_kernel_system();
+                if (kern) {
+                    bool found = kern->get_by_name<kernel::process>("ngiplay0x20003b78") != nullptr;
+                    if (!found) found = kern->get_by_name<kernel::process>("ngiplay0x20003b78.exe") != nullptr;
+                    if (found) {
+                        ngiplay_seen = true;
+                    } else if (ngiplay_seen) {
+                        // ngiplay was running and has now exited — user pressed EXIT
+                        state.app_exited.store(true);
+                    }
+                }
+            }
 
             SDL_Delay(1);
         }

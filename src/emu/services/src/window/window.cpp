@@ -2167,30 +2167,14 @@ namespace eka2l1 {
             the_ver->u32 = 0;
         }
 
-        const std::uint64_t sid = ctx.msg->msg_session->unique_id();
-        clients.emplace(sid,
+        clients.emplace(ctx.msg->msg_session->unique_id(),
             std::make_unique<epoc::window_server_client>(ctx.msg->msg_session, ctx.msg->own_thr, the_ver.value()));
-
-        // Track the playserver session so we can detect its disconnect specifically.
-        if (watched_session_id == 0 && ctx.msg->own_thr) {
-            kernel::process *pr = ctx.msg->own_thr->owning_process();
-            if (pr && pr->name() == "playserver") {
-                watched_session_id = sid;
-            }
-        }
 
         server::connect(ctx);
     }
 
     void window_server::disconnect(service::ipc_context &ctx) {
-        const std::uint64_t sid = ctx.msg->msg_session->unique_id();
-        clients.erase(sid);
-        if (on_all_clients_disconnected) {
-            // Fire if the watched playserver session disconnected, or (fallback) all clients gone.
-            if ((watched_session_id != 0 && sid == watched_session_id) || clients.empty()) {
-                on_all_clients_disconnected();
-            }
-        }
+        clients.erase(ctx.msg->msg_session->unique_id());
         server::disconnect(ctx);
     }
 
