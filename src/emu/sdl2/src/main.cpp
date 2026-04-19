@@ -720,15 +720,15 @@ namespace eka2l1::sdl {
 
             pr->run();
 
-            std::thread([emu, pr]() mutable {
-                while (!emu->should_emu_quit.load()) {
-                    if (pr->get_exit_type() != kernel::entity_exit_pending) {
-                        emu->app_exited.store(true);
-                        break;
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                }
-            }).detach();
+        std::thread([emu, pr]() mutable {
+     while (!emu->should_emu_quit.load()) {
+        if (pr->get_exit_type() != kernel::entity_exit_type::pending) {
+            emu->app_exited.store(true);
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}).detach();
 
             emu->app_launch_from_command_line = true;
             return true;
