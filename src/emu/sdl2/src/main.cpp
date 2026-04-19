@@ -116,6 +116,7 @@ namespace eka2l1::sdl {
 
         std::atomic<bool> osd_visible{false};
         std::atomic<bool> app_started{false};
+        std::atomic<std::uint32_t> last_draw_tick{0};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -311,6 +312,7 @@ namespace eka2l1::sdl {
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
         state->app_started.store(true);
+        state->last_draw_tick.store(SDL_GetTicks());
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
@@ -1635,13 +1637,12 @@ int main(int argc, char *argv[]) {
 
         state.app_exited.store(false);
 
-        // For N-Gage 2.0 (playserver): track ngiplay* child process.
-        // playserver.exe never exits so pr->logon() never fires.
-        // Instead we poll for the ngiplay* UI process and exit when it disappears.
-        bool ngiplay_seen = false;
-        int poll_counter = 0;
+        // For N-Gage 2.0 (playserver): ngiplay0x20003b78 does NOT die on EXIT —
+        // it just closes its windows. Detect exit by screen inactivity:
+        // once the first frame has been drawn (app_started) and no further
+        // draw callbacks fire for 2 seconds, the user has exited.
+        state.last_draw_tick.store(0);
 
-        // Grace period: don't check window groups until the app has had time to open its window
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
             if (eka2l1::sdl::process_termination_requested.load()) {
                 state.should_emu_quit.store(true);
@@ -1655,19 +1656,11 @@ int main(int argc, char *argv[]) {
                 eka2l1::sdl::show_osd_menu(state);
             }
 
-            // Poll every ~500ms for ngiplay* process existence.
-            if (state.symsys && (++poll_counter % 500 == 0)) {
-                eka2l1::kernel_system *kern = state.symsys->get_kernel_system();
-                if (kern) {
-                    bool found = kern->get_by_name<eka2l1::kernel::process>("ngiplay0x20003b78") != nullptr;
-                    if (!found) found = kern->get_by_name<eka2l1::kernel::process>("ngiplay0x20003b78.exe") != nullptr;
-                    if (found) {
-                        ngiplay_seen = true;
-                    } else if (ngiplay_seen) {
-                        // ngiplay was running and has now exited — user pressed EXIT
-                        state.app_exited.store(true);
-                    }
-                }
+            // Screen-inactivity exit: app has started and no frame for 2 s.
+            std::uint32_t last_tick = state.last_draw_tick.load();
+            if (state.app_started.load() && last_tick != 0 &&
+                    (SDL_GetTicks() - last_tick) > 2000) {
+                state.app_exited.store(true);
             }
 
             SDL_Delay(1);
