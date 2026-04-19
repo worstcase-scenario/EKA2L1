@@ -794,6 +794,27 @@ namespace eka2l1::sdl {
         return false;
     }
 
+    static bool remove_handler(common::arg_parser *parser, void *userdata, std::string *err) {
+        const char *tok = parser->next_token();
+        if (!tok) { *err = "No UID specified. Usage: --remove 0x<uid>"; return false; }
+        std::string tokstr = tok;
+        std::uint32_t uid = 0;
+        try {
+            if (tokstr.length() > 2 && tokstr.substr(0, 2) == "0x")
+                uid = static_cast<std::uint32_t>(std::stoul(tokstr.substr(2), nullptr, 16));
+            else
+                uid = static_cast<std::uint32_t>(std::stoul(tokstr, nullptr, 10));
+        } catch (...) { *err = "Invalid UID: " + tokstr; return false; }
+        auto *emu = reinterpret_cast<emulator_state *>(userdata);
+        manager::packages *pkgmngr = emu->symsys->get_packages();
+        if (!pkgmngr) { *err = "Package manager not available"; return false; }
+        package::object *pkg = pkgmngr->package(uid);
+        if (!pkg) { *err = "No installed package found with UID " + tokstr; return false; }
+        if (!pkgmngr->uninstall_package(*pkg)) { *err = "Uninstall failed for UID " + tokstr; return false; }
+        std::cout << "Package uninstalled: " << tokstr << std::endl;
+        return false;
+    }
+
     static bool install_device_handler(common::arg_parser *parser, void *userdata, std::string *err) {
         const char *rpkg_path = parser->next_token();
         if (!rpkg_path) {
@@ -1558,6 +1579,7 @@ int main(int argc, char *argv[]) {
     parser.add("--app, -a, --run", "Run an app by name, UID (0x...), or virtual path", eka2l1::sdl::app_run_handler);
     parser.add("--device, -dvc", "Set device by firmware code", eka2l1::sdl::device_set_handler);
     parser.add("--install, -i", "Install a SIS package", eka2l1::sdl::install_handler);
+    parser.add("--remove, --uninstall", "Uninstall a package by UID (0x...)", eka2l1::sdl::remove_handler);
     parser.add("--installdevice", "Install device from RPKG + ROM files", eka2l1::sdl::install_device_handler);
     parser.add("--mount, -m", "Mount a folder/zip as Game Card ROM on E:", eka2l1::sdl::mount_card_handler);
 
