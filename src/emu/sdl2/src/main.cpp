@@ -69,7 +69,6 @@
 #include <gdbstub/gdbstub.h>
 
 #include <atomic>
-#include <csignal>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -79,12 +78,6 @@
 #include <SDL2/SDL_ttf.h>
 
 namespace eka2l1::sdl {
-    static std::atomic<bool> process_termination_requested{ false };
-
-    static void handle_process_termination_signal(int) {
-        process_termination_requested.store(true);
-    }
-
     struct emulator_state {
         std::unique_ptr<system> symsys;
         std::unique_ptr<drivers::graphics_driver> graphics_driver;
@@ -115,10 +108,6 @@ namespace eka2l1::sdl {
         std::atomic<bool> show_osd_requested{false};
 
         std::atomic<bool> osd_visible{false};
-        std::atomic<bool> app_started{false};
-        std::atomic<std::uint32_t> last_draw_tick{0};
-        std::atomic<std::uint32_t> last_input_tick{0};
-        std::atomic<int> draw_frame_count{0};
         std::mutex osd_mutex;
         std::vector<uint8_t> osd_pixels;
         int osd_w = 0, osd_h = 0;
@@ -289,8 +278,6 @@ namespace eka2l1::sdl {
         winserv = reinterpret_cast<window_server *>(the_sys->get_kernel_system()->get_by_name<service::server>(
             get_winserv_name_by_epocver(symsys->get_symbian_version_use())));
 
-        // winserv available (not used for disconnect detection here)
-
         if (stage_two_inited) {
             register_draw_callback();
             symsys->initialize_user_parties();
@@ -313,10 +300,6 @@ namespace eka2l1::sdl {
     }
 
     static void draw_screen_impl(emulator_state *state, epoc::screen *scr, const bool is_dsa) {
-        const int fc = state->draw_frame_count.fetch_add(1) + 1;
-        if (fc >= 30)
-            state->app_started.store(true);
-        state->last_draw_tick.store(SDL_GetTicks());
         state->graphics_driver->wait_for(&state->present_status);
 
         const int total_rotation = (scr->ui_rotation + state->host_rotation.load()) % 360;
@@ -516,7 +499,6 @@ namespace eka2l1::sdl {
             return;
         }
 
-        emu->last_input_tick.store(SDL_GetTicks());
         key = remap_arrow_for_rotation(key, emu->host_rotation.load());
         auto evt = make_key_event_driver(static_cast<int>(key), drivers::key_state::pressed);
 
@@ -715,10 +697,8 @@ namespace eka2l1::sdl {
             if (registry) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *pr) {
-                    if (pr) pr->logon([emu](kernel::process *) {
-                        emu->app_exited.store(true);
-                    });
+                svr->launch_app(*registry, cmd, nullptr, [](kernel::process *pr) {
+                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -735,9 +715,7 @@ namespace eka2l1::sdl {
                 *err = "Unable to launch process: " + tokstr;
                 return false;
             }
-            pr->logon([emu](kernel::process *) {
-                emu->app_exited.store(true);
-            });
+            pr->logon([](kernel::process *) { std::exit(0); });
             pr->run();
             emu->app_launch_from_command_line = true;
             return true;
@@ -749,10 +727,8 @@ namespace eka2l1::sdl {
             if (common::ucs2_to_utf8(reg.mandatory_info.long_caption.to_std_string(nullptr)) == tokstr) {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
-                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *pr) {
-                    if (pr) pr->logon([emu](kernel::process *) {
-                        emu->app_exited.store(true);
-                    });
+                svr->launch_app(reg, cmd, nullptr, [](kernel::process *pr) {
+                    if (pr) pr->logon([](kernel::process *) { std::exit(0); });
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -806,43 +782,21 @@ namespace eka2l1::sdl {
 
     static bool remove_handler(common::arg_parser *parser, void *userdata, std::string *err) {
         const char *tok = parser->next_token();
-        if (!tok) {
-            *err = "No UID specified. Usage: --remove 0x<uid>";
-            return false;
-        }
-
+        if (!tok) { *err = "No UID specified. Usage: --remove 0x<uid>"; return false; }
         std::string tokstr = tok;
         std::uint32_t uid = 0;
-
         try {
             if (tokstr.length() > 2 && tokstr.substr(0, 2) == "0x")
                 uid = static_cast<std::uint32_t>(std::stoul(tokstr.substr(2), nullptr, 16));
             else
                 uid = static_cast<std::uint32_t>(std::stoul(tokstr, nullptr, 10));
-        } catch (...) {
-            *err = "Invalid UID: " + tokstr;
-            return false;
-        }
-
+        } catch (...) { *err = "Invalid UID: " + tokstr; return false; }
         auto *emu = reinterpret_cast<emulator_state *>(userdata);
         manager::packages *pkgmngr = emu->symsys->get_packages();
-
-        if (!pkgmngr) {
-            *err = "Package manager not available";
-            return false;
-        }
-
+        if (!pkgmngr) { *err = "Package manager not available"; return false; }
         package::object *pkg = pkgmngr->package(uid);
-        if (!pkg) {
-            *err = "No installed package found with UID " + tokstr;
-            return false;
-        }
-
-        if (!pkgmngr->uninstall_package(*pkg)) {
-            *err = "Uninstall failed for UID " + tokstr;
-            return false;
-        }
-
+        if (!pkg) { *err = "No installed package found with UID " + tokstr; return false; }
+        if (!pkgmngr->uninstall_package(*pkg)) { *err = "Uninstall failed for UID " + tokstr; return false; }
         std::cout << "Package uninstalled: " << tokstr << std::endl;
         return false;
     }
@@ -1284,11 +1238,6 @@ namespace eka2l1::sdl {
         bool running = true;
 
         while (running) {
-            if (process_termination_requested.load()) {
-                state.should_emu_quit.store(true);
-                break;
-            }
-
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
                 if (ev.type == SDL_QUIT) {
@@ -1445,17 +1394,10 @@ namespace eka2l1::sdl {
         int total_count = static_cast<int>(apps.size());
 
         while (running) {
-            if (process_termination_requested.load()) {
-                state.should_emu_quit.store(true);
-                running = false;
-                break;
-            }
-
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 switch (event.type) {
                 case SDL_QUIT:
-                    state.should_emu_quit.store(true);
                     running = false;
                     break;
                 case SDL_KEYDOWN:
@@ -1604,9 +1546,6 @@ namespace eka2l1::sdl {
 }  // namespace eka2l1::sdl
 
 int main(int argc, char *argv[]) {
-    std::signal(SIGINT, eka2l1::sdl::handle_process_termination_signal);
-    std::signal(SIGTERM, eka2l1::sdl::handle_process_termination_signal);
-
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;
@@ -1672,11 +1611,6 @@ int main(int argc, char *argv[]) {
     bool first_launch = true;
 
     while (true) {
-        if (eka2l1::sdl::process_termination_requested.load()) {
-            state.should_emu_quit.store(true);
-            break;
-        }
-
         if (!state.app_launch_from_command_line || !first_launch) {
             if (!eka2l1::sdl::show_app_launcher(state)) {
                 break;
@@ -1689,50 +1623,13 @@ int main(int argc, char *argv[]) {
         SDL_RaiseWindow(state.window->get_sdl_window());
 
         state.app_exited.store(false);
-        state.app_started.store(false);
-        state.draw_frame_count.store(0);
-        state.last_draw_tick.store(0);
-        state.last_input_tick.store(0);
 
         while (!state.should_emu_quit && !state.window->should_quit() && !state.app_exited.load()) {
-            if (eka2l1::sdl::process_termination_requested.load()) {
-                state.should_emu_quit.store(true);
-                break;
-            }
-
             state.window->poll_events();
 
             if (state.show_osd_requested.load()) {
                 state.show_osd_requested.store(false);
                 eka2l1::sdl::show_osd_menu(state);
-            }
-
-            // Exit detection for apps that don't terminate their Symbian process
-            // (e.g. N-Gage 2.0 platform). Apps that DO die will have already set
-            // app_exited via the logon callback above.
-            //
-            // Two-phase logic:
-            //   - If the user pressed a key recently (within 60 s) and drawing has
-            //     stopped for 5 s → user pressed EXIT and the app is shutting down.
-            //   - Absolute fallback: no drawing for 5 minutes → exit regardless.
-            //
-            // This avoids auto-exiting while the user is simply idle in the menu
-            // (no input, event-driven UI = no frames drawn).
-            if (state.app_started.load()) {
-                const std::uint32_t now        = SDL_GetTicks();
-                const std::uint32_t last_draw  = state.last_draw_tick.load();
-                const std::uint32_t last_input = state.last_input_tick.load();
-
-                if (last_draw != 0) {
-                    const std::uint32_t draw_silence = now - last_draw;
-                    const bool had_recent_input =
-                        (last_input != 0) && (now - last_input < 60000u);
-
-                    if ((draw_silence > 5000u && had_recent_input) ||
-                            draw_silence > 300000u) {
-                        state.app_exited.store(true);
-                    }
-                }
             }
 
             SDL_Delay(1);
@@ -1741,10 +1638,6 @@ int main(int argc, char *argv[]) {
         bool user_quit = state.should_emu_quit.load() || state.window->should_quit();
         if (user_quit)
             break;
-
-        if (state.app_launch_from_command_line && state.app_exited.load()) {
-            break;
-        }
 
         // App exited: hide emulator window and go back to launcher
         SDL_HideWindow(state.window->get_sdl_window());
