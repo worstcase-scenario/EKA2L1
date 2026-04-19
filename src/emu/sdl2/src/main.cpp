@@ -286,12 +286,7 @@ namespace eka2l1::sdl {
         winserv = reinterpret_cast<window_server *>(the_sys->get_kernel_system()->get_by_name<service::server>(
             get_winserv_name_by_epocver(symsys->get_symbian_version_use())));
 
-        if (winserv) {
-            winserv->on_all_clients_disconnected = [this]() {
-                if (app_started.load())
-                    std::exit(0);
-            };
-        }
+        // winserv available (not used for disconnect detection here)
 
         if (stage_two_inited) {
             register_draw_callback();
@@ -1662,10 +1657,10 @@ int main(int argc, char *argv[]) {
 
             // Poll every ~500ms for ngiplay* process existence.
             if (state.symsys && (++poll_counter % 500 == 0)) {
-                kernel_system *kern = state.symsys->get_kernel_system();
+                eka2l1::kernel_system *kern = state.symsys->get_kernel_system();
                 if (kern) {
-                    bool found = kern->get_by_name<kernel::process>("ngiplay0x20003b78") != nullptr;
-                    if (!found) found = kern->get_by_name<kernel::process>("ngiplay0x20003b78.exe") != nullptr;
+                    bool found = kern->get_by_name<eka2l1::kernel::process>("ngiplay0x20003b78") != nullptr;
+                    if (!found) found = kern->get_by_name<eka2l1::kernel::process>("ngiplay0x20003b78.exe") != nullptr;
                     if (found) {
                         ngiplay_seen = true;
                     } else if (ngiplay_seen) {
