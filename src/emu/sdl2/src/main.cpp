@@ -703,13 +703,11 @@ namespace eka2l1::sdl {
                     if (!pr) return;
                     std::thread([emu, pr]() {
                         while (!emu->should_emu_quit.load()) {
-                            // Case 1: process exited normally
                             if (pr->get_exit_type() != kernel::entity_exit_type::pending) {
                                 emu->app_exited.store(true);
                                 break;
                             }
-                            // Case 2: primary thread was killed (classic N-Gage games)
-                            kernel::thread *thr = pr->get_primary_thread().get();
+                            kernel::thread *thr = pr->get_primary_thread();
                             if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
                                 emu->app_exited.store(true);
                                 break;
@@ -743,7 +741,7 @@ namespace eka2l1::sdl {
                     emu->app_exited.store(true);
                     break;
                 }
-                kernel::thread *thr = pr->get_primary_thread().get();
+                kernel::thread *thr = pr->get_primary_thread();
                 if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
                     emu->app_exited.store(true);
                     break;
@@ -771,7 +769,7 @@ namespace eka2l1::sdl {
                                 emu->app_exited.store(true);
                                 break;
                             }
-                            kernel::thread *thr = pr->get_primary_thread().get();
+                            kernel::thread *thr = pr->get_primary_thread();
                             if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
                                 emu->app_exited.store(true);
                                 break;
