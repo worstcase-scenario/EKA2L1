@@ -42,6 +42,7 @@
 
 #include <kernel/kernel.h>
 #include <kernel/libmanager.h>
+#include <kernel/thread.h>
 
 #include <loader/mbm.h>
 #include <loader/mif.h>
@@ -698,8 +699,24 @@ namespace eka2l1::sdl {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
                 emu->app_exited.store(false);
-                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process*) {
-                    emu->app_exited.store(true);
+                svr->launch_app(*registry, cmd, nullptr, [emu](kernel::process *pr) {
+                    if (!pr) return;
+                    std::thread([emu, pr]() {
+                        while (!emu->should_emu_quit.load()) {
+                            // Case 1: process exited normally
+                            if (pr->get_exit_type() != kernel::entity_exit_type::pending) {
+                                emu->app_exited.store(true);
+                                break;
+                            }
+                            // Case 2: primary thread was killed (classic N-Gage games)
+                            kernel::thread *thr = pr->get_primary_thread().get();
+                            if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
+                                emu->app_exited.store(true);
+                                break;
+                            }
+                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        }
+                    }).detach();
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
@@ -721,14 +738,19 @@ namespace eka2l1::sdl {
             pr->run();
 
         std::thread([emu, pr]() mutable {
-     while (!emu->should_emu_quit.load()) {
-        if (pr->get_exit_type() != kernel::entity_exit_type::pending) {
-            emu->app_exited.store(true);
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-}).detach();
+            while (!emu->should_emu_quit.load()) {
+                if (pr->get_exit_type() != kernel::entity_exit_type::pending) {
+                    emu->app_exited.store(true);
+                    break;
+                }
+                kernel::thread *thr = pr->get_primary_thread().get();
+                if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
+                    emu->app_exited.store(true);
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }).detach();
 
             emu->app_launch_from_command_line = true;
             return true;
@@ -741,8 +763,22 @@ namespace eka2l1::sdl {
                 epoc::apa::command_line cmd;
                 cmd.launch_cmd_ = epoc::apa::command_create;
                 emu->app_exited.store(false);
-                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process*) {
-                    emu->app_exited.store(true);
+                svr->launch_app(reg, cmd, nullptr, [emu](kernel::process *pr) {
+                    if (!pr) return;
+                    std::thread([emu, pr]() {
+                        while (!emu->should_emu_quit.load()) {
+                            if (pr->get_exit_type() != kernel::entity_exit_type::pending) {
+                                emu->app_exited.store(true);
+                                break;
+                            }
+                            kernel::thread *thr = pr->get_primary_thread().get();
+                            if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
+                                emu->app_exited.store(true);
+                                break;
+                            }
+                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        }
+                    }).detach();
                 });
                 emu->app_launch_from_command_line = true;
                 return true;
