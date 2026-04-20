@@ -42,7 +42,6 @@
 
 #include <kernel/kernel.h>
 #include <kernel/libmanager.h>
-#include <kernel/thread.h>
 
 #include <loader/mbm.h>
 #include <loader/mif.h>
@@ -708,7 +707,7 @@ namespace eka2l1::sdl {
                                 break;
                             }
                             kernel::thread *thr = pr->get_primary_thread();
-                            if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
+                            if (thr && static_cast<int>(thr->current_state()) == 4) {
                                 emu->app_exited.store(true);
                                 break;
                             }
@@ -742,7 +741,7 @@ namespace eka2l1::sdl {
                     break;
                 }
                 kernel::thread *thr = pr->get_primary_thread();
-                if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
+                if (thr && static_cast<int>(thr->current_state()) == 4) {
                     emu->app_exited.store(true);
                     break;
                 }
@@ -770,7 +769,7 @@ namespace eka2l1::sdl {
                                 break;
                             }
                             kernel::thread *thr = pr->get_primary_thread();
-                            if (thr && thr->current_state() == kernel::thread::thread_state::stop) {
+                            if (thr && static_cast<int>(thr->current_state()) == 4) {
                                 emu->app_exited.store(true);
                                 break;
                             }
